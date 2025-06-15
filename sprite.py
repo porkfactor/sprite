@@ -1,140 +1,169 @@
 import io
 from pathlib import Path
 from PIL import Image
-from dataclasses import dataclass
+import pdb
 
-@dataclass
+
 class pixel():
-    r: int
-    g: int
-    b: int
-    a: int
+    def __init__(self, r: int, g: int, b: int, a: int=0):
+        self._r = r
+        self._g = g
+        self._b = b
+        self._a = a
 
-@dataclass
-class block():
-    x: int
-    y: int
-    width: int
-    height: int
+    def __repr__(self) -> str:
+        return f'{{r={self._r}, g={self._g}, b={self._b}, a={self._a}}}'
 
-def condense_block(im: Image, block: list[int]):
-    pass
+    @property
+    def r(self) -> int:
+        return self._r
 
-def split_columns(b: block, min_width=None) -> list[block]:
-    columns: list[block] = []
-    in_column: bool = False
-    column_start: int = 0
-    column_end: int = 0
+    @property
+    def g(self) -> int:
+        return self._g
 
-    for x in range(b.width):
-        empty = True
+    @property
+    def b(self) -> int:
+        return self._b
 
-        for y in range(b.height):
-            p: pixel = b.getpixel(x=x, y=y)
-            if p.a != 0:
-                empty = False
-                break
+    @property
+    def a(self) -> int:
+        return self._a
+
+class region:
+    def __init__(self, x, y, width, height, data):
+        self._x: int = x
+        self._y: int = y
+        self._width: int = width
+        self._height: int = height
+        self._data: list[pixel] = data
+
+        if len(self._data) != width * height:
+            raise BufferError
+
+    @property
+    def x(self) -> int:
+        return self._x
+
+    @property
+    def y(self) -> int:
+        return self._y
+
+    @property
+    def width(self) -> int:
+        return self._width
+
+    @property
+    def height(self) -> int:
+        return self._height
+    
+    @property
+    def data(self) -> list[pixel]:
+        return self._data
+    
+    def __repr__(self) -> str:
+        return f'{self._x} {self._y} {self._width} {self._height}'
+
+    def getpixel(self, x: int, y: int) -> pixel:
+        return self._data[(y * self._width) + x]
+
+    def subregion(self, x: int, y: int, width: int, height: int):
+        if x + width > self._width:
+            raise IndexError
         
-        if empty and in_column:
-            in_column = False
-            column_end = y - 1
-            columns.append(column_start, column_end)
-        elif not empty and not in_column:
-            in_column = True
-            column_start = y
+        if y + height > self._height:
+            raise IndexError
 
-    return columns
+        data: list[pixel] = []
 
-def split_rows(b: block, min_height=None) -> list[block]:
-    rows: list[block] = []
-    in_row: bool = False
-    row_start: int = 0
-    row_end: int = 0
+        for row in range(height):
+            start = ((y + row) * self._width) + x
+            end = start + width
+            data.extend(self._data[start:end])
 
-    for y in range(b.height):
-        empty = True
+        return region(x=self._x + x, y=self._y + y, width=width, height=height, data=data)
 
-        for x in range(b.width):
-            p: pixel = b.getpixel(x=x, y=y)
-            if p.a != 0:
-                empty = False
-                break
+    def split_x(self, min_width=None) -> list:
+        columns: list = []
+        in_column: bool = False
+        column_start: int = 0
+        column_end: int = 0
 
-        if empty and in_row:
-            in_row = False
-            row_end = y - 1
-            rows.append(row_start, row_end)
-        elif not empty and not in_row:
-            in_row = True
-            row_start = y
+        for x in range(self._width):
+            empty = True
 
-    return rows
+            for y in range(self._height):
+                p: pixel = self.getpixel(x=x, y=y)
+                if p.a != 0:
+                    empty = False
+                    break
+            
+            if empty and in_column:
+                in_column = False
+                column_end = x - 1
+                columns.append(self.subregion(x=column_start, y=0, width=column_end - column_start, height=self.height))
+            elif not empty and not in_column:
+                in_column = True
+                column_start = x
 
-def split_block(b: block, min_width=None, min_height=None) -> list[block]:
-    blocks: list[block] = []
+        return columns if columns else [self]
 
-    for row in split_rows(b, min_width=min_width, min_height=min_height):
-        blocks.append(split_columns(row, min_width=min_width, min_height=min_height))
+    def split_y(self, min_height=None) -> list:
+        rows: list = []
+        in_row: bool = False
+        row_start: int = 0
+        row_end: int = 0
 
-    return blocks
+        for y in range(self._height):
+            empty = True
+
+            for x in range(self._width):
+                p: pixel = self.getpixel(x=x, y=y)
+                if p.a != 0:
+                    empty = False
+                    break
+
+            if empty and in_row:
+                in_row = False
+                row_end = y - 1
+                rows.append(self.subregion(x=0, y=row_start, width=self._width, height=row_end - row_start))
+            elif not empty and not in_row:
+                in_row = True
+                row_start = y
+
+        return rows if rows else [self]
+
+    def split_yx(self, min_width=None, min_height=None) -> list:
+        blocks: list[region] = []
+
+        for row in self.split_y(min_height=min_height):
+            blocks.extend(row.split_x(min_width=min_width))
+
+        return blocks if blocks else [self]
+    
+    @staticmethod
+    def split(x: int, y: int, width: int, height: int, data: list, min_width: int=None, min_height: int=None) -> list:
+        r = region(x=x, y=y, width=width, height=height, data=data)
+        return r.split_yx(min_width=min_width, min_height=min_height)
 
 def main():
     filename: Path = 'turrican.png'
     with Image.open(filename) as im:
         im = im.convert(mode='RGBA')
 
-        bands = []
-        in_band: bool = False
-        band_start: int = 0
-        band_end: int = 0
+        data=[pixel(b[0], b[1], b[2], b[3]) for b in im.getdata()]
 
-        for y in range(im.height):
-            blank = True
-            for x in range(im.width):
-                p = im.getpixel(xy=(x, y))
-                if p != (255, 0, 255, 0):
-                    blank = False
-                    break
-            if blank:
-                if in_band:
-                    in_band = False
-                    band_end = y - 1
-                    bands.append((band_start, band_end))
-            else:
-                if not in_band:
-                    in_band = True
-                    band_start = y
-        
-        blocks = []
+        print(f'height={im.height} width={im.width} thing={im.width * im.height} len={len(data)}')
+        blocks = region.split(x=0, y=0, width=im.width, height=im.height, data=data)
 
-        for band in bands:
-            print(band)
-            in_column = False
-            column_start: int = 0
-            column_end: int = 0
-
-            for x in range(im.width):
-                blank = True
-
-                for y in range(band[0], band[1]):
-                    p = im.getpixel(xy=(x, y))
-                    if p != (255, 0, 255, 0):
-                        blank = False
-                        break
-
-                if blank:
-                    if in_column:
-                        in_column = False
-                        column_end = x - 1
-                        blocks.append((column_start, column_end, band[0], band[1]))
-                else:
-                    if not in_column:
-                        in_column = True
-                        column_start = x
-            break
-
+        n = 0
         for block in blocks:
-            print(block)
+            filename: Path = Path(f'image_{n}.png')
+            with open(file=filename, mode='wb') as f:
+                i = Image.new(mode='RGBA', size=(block.width, block.height))
+                i.putdata([(p.r, p.g, p.b, p.a) for p in block.data])
+                i.save(fp=f, format='png')
+                n += 1
 
 if __name__ == '__main__':
     main()
