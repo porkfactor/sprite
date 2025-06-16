@@ -101,7 +101,7 @@ class region:
             if empty and in_column:
                 in_column = False
                 column_end = x - 1
-                columns.append(self.subregion(x=column_start, y=0, width=column_end - column_start, height=self.height))
+                columns.append(self.subregion(x=column_start, y=0, width=column_end - column_start + 1, height=self.height))
             elif not empty and not in_column:
                 in_column = True
                 column_start = x
@@ -126,7 +126,7 @@ class region:
             if empty and in_row:
                 in_row = False
                 row_end = y - 1
-                rows.append(self.subregion(x=0, y=row_start, width=self._width, height=row_end - row_start))
+                rows.append(self.subregion(x=0, y=row_start, width=self._width, height=row_end - row_start + 1))
             elif not empty and not in_row:
                 in_row = True
                 row_start = y
