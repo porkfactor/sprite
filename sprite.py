@@ -1,8 +1,7 @@
 import io
 from pathlib import Path
 from PIL import Image
-import pdb
-
+import argparse
 
 class pixel():
     def __init__(self, r: int, g: int, b: int, a: int=0):
@@ -146,9 +145,9 @@ class region:
         r = region(x=x, y=y, width=width, height=height, data=data)
         return r.split_yx(min_width=min_width, min_height=min_height)
 
-def main():
-    filename: Path = 'turrican.png'
-    with Image.open(filename) as im:
+def main(input: Path, output: Path):
+    output.mkdir(parents=True, exist_ok=True)
+    with Image.open(input) as im:
         im = im.convert(mode='RGBA')
 
         data=[pixel(b[0], b[1], b[2], b[3]) for b in im.getdata()]
@@ -158,7 +157,7 @@ def main():
 
         n = 0
         for block in blocks:
-            filename: Path = Path(f'image_{n}.png')
+            filename: Path = Path(output / f'image_{n}.png')
             with open(file=filename, mode='wb') as f:
                 i = Image.new(mode='RGBA', size=(block.width, block.height))
                 i.putdata([(p.r, p.g, p.b, p.a) for p in block.data])
@@ -166,4 +165,14 @@ def main():
                 n += 1
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--input', action='store', dest='input', required=True)
+    parser.add_argument('--output', action='store', dest='output', default='.')
+
+    try:
+        args = parser.parse_args()
+    except Exception as e:
+        print(f'{e}')
+        exit(1)
+    else:
+        main(input=Path(args.input), output=Path(args.output))
