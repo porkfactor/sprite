@@ -1,14 +1,14 @@
-import io
+import sys
+import argparse
 from pathlib import Path
 from PIL import Image
-import argparse
 
 class pixel():
     def __init__(self, r: int, g: int, b: int, a: int=0):
-        self._r = r
-        self._g = g
-        self._b = b
-        self._a = a
+        self._r = int(r)
+        self._g = int(g)
+        self._b = int(b)
+        self._a = int(a)
 
     def __repr__(self) -> str:
         return f'{{r={self._r}, g={self._g}, b={self._b}, a={self._a}}}'
@@ -28,6 +28,13 @@ class pixel():
     @property
     def a(self) -> int:
         return self._a
+    
+    @property
+    def rgb565(self) -> int:
+        if self._a:
+            return ((self._r >> 3) << 11) | ((self._g >> 2) << 5) | (self._b >> 3)
+        else:
+            return 0
 
 class region:
     def __init__(self, x, y, width, height, data):
@@ -145,24 +152,85 @@ class region:
         r = region(x=x, y=y, width=width, height=height, data=data)
         return r.split_yx(min_width=min_width, min_height=min_height)
 
+def save_bitmap(block: region, filename: Path):
+    with open(file=filename, mode='wb') as f:
+        i = Image.new(mode='RGBA', size=(block.width, block.height))
+        i.putdata([(p.r, p.g, p.b, p.a) for p in block.data])
+        i.save(fp=f, format='png')
+
+def write_array(f, bitmap: list[int], width: int=16, wrap: int=8):
+    w=int(width/4)
+    for i in range(len(bitmap)):
+        if (i % wrap) == 0:
+            if i != 0:
+                f.write('\n')
+            f.write('    ')
+        else:
+            f.write(' ')
+        f.write(f'0x{bitmap[i]:0{w}x},')
+    f.write('\n')
+
+def write_bitarray(f, block: region, width: int=8, wrap: int=8):
+    bitmap = []
+    val: int = 0
+    for i in range(len(block.data)):
+        if block.data[i].a:
+            val |= (1 << (i % width))
+
+        if (i != 0) and ((i % width) == 0):
+            bitmap.append(val)
+            val = 0
+    
+    write_array(f, bitmap, width=width, wrap=wrap)
+
+def save_c_decl(f, slug: str, block: region):
+    f.write(f'static size_t const {slug}_width = {block.width};\n')
+    f.write(f'static size_t const {slug}_height = {block.height};\n')
+    f.write(f'static uint16_t const {slug}_rgb565[] PROGMEM =\n')
+    f.write(f'{{\n')
+    write_array(f, [p.rgb565 for p in block.data])
+    f.write(f'}};\n')
+
+    f.write(f'static uint8_t const {slug}_mask[] PROGMEM =\n')
+    f.write(f'{{\n')
+    write_bitarray(f, block)
+    f.write(f'}};\n')
+
+def write_header(f, slug: str, blocks: list[region]):
+    f.write(f'#ifndef {slug.upper()}_H_\n')
+    f.write(f'#define {slug.upper()}_H_\n')
+    f.write('\n')
+
+    i = 0
+    for block in blocks:
+        save_c_decl(f, slug=f'{slug}_image_{i}', block=block)
+        i = i + 1
+
+    f.write('\n')
+    f.write(f'#endif\n')
+
+def save_header(filename: str, blocks: list[region]):
+    guard = filename.upper().replace('.', '_')
+
+    with open(filename, 'w') as f:
+        save_header(f, blocks=blocks, guard=guard)
+
+def safe_identifier(s: str):
+    return s.replace('.', '_')
+
 def main(input: Path, output: Path):
     output.mkdir(parents=True, exist_ok=True)
+    blocks = []
     with Image.open(input) as im:
         im = im.convert(mode='RGBA')
 
         data=[pixel(b[0], b[1], b[2], b[3]) for b in im.getdata()]
 
         print(f'height={im.height} width={im.width} thing={im.width * im.height} len={len(data)}')
-        blocks = region.split(x=0, y=0, width=im.width, height=im.height, data=data)
+        blocks.extend(region.split(x=0, y=0, width=im.width, height=im.height, data=data))
 
-        n = 0
-        for block in blocks:
-            filename: Path = Path(output / f'image_{n}.png')
-            with open(file=filename, mode='wb') as f:
-                i = Image.new(mode='RGBA', size=(block.width, block.height))
-                i.putdata([(p.r, p.g, p.b, p.a) for p in block.data])
-                i.save(fp=f, format='png')
-                n += 1
+    with open(f'{safe_identifier(str(input.name))}.h', 'w') as f:
+        write_header(f, blocks=blocks, slug=safe_identifier(str(input.name)))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
